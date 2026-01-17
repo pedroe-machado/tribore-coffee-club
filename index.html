@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tribore Coffee Club - Info Card</title>
+    <script src="aftertaste.js"></script>
+    <style>
+        :root { --primary: #3d2b1f; --bg: #fdfaf7; --text: #2c1e15; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .card { background: white; max-width: 400px; width: 100%; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); overflow: hidden; border: 1px solid #eee; }
+        .header { background: var(--primary); color: white; padding: 25px; text-align: center; }
+        .content { padding: 20px; }
+        .info-row { display: flex; justify-content: space-between; border-bottom: 1px solid #f0f0f0; padding: 10px 0; font-size: 14px; }
+        .info-row strong { text-transform: capitalize; color: #666; }
+        .comments-section { padding: 20px; background: #fafafa; border-top: 1px solid #eee; }
+        .comment { background: white; padding: 10px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #eee; font-size: 13px; }
+        .comment-header { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-weight: bold; }
+        .comment-header img { width: 24px; height: 24px; border-radius: 50%; }
+        button { background: var(--primary); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; width: 100%; font-weight: bold; }
+        textarea { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        #error-msg { text-align: center; padding: 50px; color: #999; }
+    </style>
+</head>
+<body>
+
+<div id="app" class="card" style="display:none;">
+    <div class="header">
+        <h1 id="coffee-name" style="margin:0; font-size: 1.5rem;"></h1>
+    </div>
+    <div id="coffee-details" class="content">
+        </div>
+    
+    <div class="comments-section">
+        <h3>Comentários</h3>
+        <div id="auth-area">
+            <button id="btn-login">Login com Google para comentar</button>
+        </div>
+        <div id="comment-form" style="display:none;">
+            <div id="user-info" style="margin-bottom:10px; font-size:14px"></div>
+            <textarea id="comment-text" placeholder="O que achou deste café?" rows="3"></textarea>
+            <button id="btn-send">Enviar Comentário</button>
+        </div>
+        <div id="comments-list" style="margin-top:20px;"></div>
+    </div>
+</div>
+
+<div id="error-msg" style="display:none;">Café não encontrado.</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+    import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+
+    // --- COLE SUAS CONFIGURAÇÕES DO FIREBASE AQUI ---
+    const firebaseConfig = {
+        apiKey: "SUA_API_KEY",
+        authDomain: "SEU_PROJETO.firebaseapp.com",
+        projectId: "SEU_PROJETO_ID",
+        storageBucket: "SEU_PROJETO.appspot.com",
+        messagingSenderId: "SEU_ID",
+        appId: "SEU_APP_ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    const params = new URLSearchParams(window.location.search);
+    const cafeId = params.get('cafe');
+    const coffee = typeof COFFEE_DATA !== 'undefined' ? COFFEE_DATA[cafeId] : null;
+
+    if (coffee) {
+        document.getElementById('app').style.display = 'block';
+        document.getElementById('coffee-name').innerText = coffee.nome;
+        
+        const detailsContainer = document.getElementById('coffee-details');
+        Object.entries(coffee).forEach(([key, value]) => {
+            if (key !== 'nome') {
+                const label = key.replace(/_/g, ' ');
+                const row = document.createElement('div');
+                row.className = 'info-row';
+                row.innerHTML = `<strong>${label}</strong> <span>${value}</span>`;
+                detailsContainer.appendChild(row);
+            }
+        });
+
+        // Lógica de Comentários Real-time
+        const q = query(collection(db, "comments"), where("cafeId", "==", cafeId), orderBy("createdAt", "desc"));
+        onSnapshot(q, (snapshot) => {
+            const list = document.getElementById('comments-list');
+            list.innerHTML = '';
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                list.innerHTML += `
+                    <div class="comment">
+                        <div class="comment-header">
+                            <img src="${data.userPhoto}" /> <span>${data.userName}</span>
+                        </div>
+                        <div>${data.text}</div>
+                    </div>`;
+            });
+        });
+    } else {
+        document.getElementById('error-msg').style.display = 'block';
+    }
+
+    // Auth e Envio
+    onAuthStateChanged(auth, user => {
+        if (user) {
+            document.getElementById('auth-area').style.display = 'none';
+            document.getElementById('comment-form').style.display = 'block';
+            document.getElementById('user-info').innerText = `Logado como: ${user.displayName}`;
+        }
+    });
+
+    document.getElementById('btn-login').onclick = () => signInWithPopup(auth, provider);
+    
+    document.getElementById('btn-send').onclick = async () => {
+        const text = document.getElementById('comment-text').value;
+        if (!text) return;
+        await addDoc(collection(db, "comments"), {
+            cafeId, text,
+            userId: auth.currentUser.uid,
+            userName: auth.currentUser.displayName,
+            userPhoto: auth.currentUser.photoURL,
+            createdAt: serverTimestamp()
+        });
+        document.getElementById('comment-text').value = '';
+    };
+</script>
+</body>
+</html>
